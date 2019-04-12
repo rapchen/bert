@@ -374,6 +374,88 @@ class ColaProcessor(DataProcessor):
     return examples
 
 
+class BlackTaleProcessor(DataProcessor):
+  """Processor for the Black Tale data set."""
+
+  def get_train_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
+
+  def get_dev_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
+
+  def get_test_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
+
+  def get_labels(self):
+    """See base class."""
+    return ["是", "否", "无关紧要"]
+
+  def _create_examples(self, lines, set_type):
+    """Creates examples for the training and dev sets."""
+    examples = []
+    for (i, line) in enumerate(lines):
+      if i == 0:
+        continue
+      guid = str(line[0])
+      text_a = tokenization.convert_to_unicode(line[1])
+      if set_type == "test":
+        label = "无关紧要"
+      else:
+        label = tokenization.convert_to_unicode(line[2])
+      examples.append(
+          InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+    return examples
+
+
+class InferProcessor(DataProcessor):
+  """Processor for the Black Tale data set."""
+
+  def get_train_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
+
+  def get_dev_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
+
+  def get_test_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
+
+  def get_labels(self):
+    """See base class."""
+    return ["是", "否", "无关紧要"]
+
+  def _create_examples(self, lines, set_type):
+    """Creates examples for the training and dev sets."""
+    examples = []
+    tale_text = ''
+    for (i, line) in enumerate(lines):
+      if i == 0:
+        continue
+      guid = str(line[0])
+      if guid == 'TALE':
+        tale_text = tokenization.convert_to_unicode(line[1])
+        continue
+      text_a = tokenization.convert_to_unicode(line[1])
+      if set_type == "test":
+        label = "无关紧要"
+      else:
+        label = tokenization.convert_to_unicode(line[2])
+      examples.append(
+          InputExample(guid=guid, text_a=text_a, text_b=tale_text, label=label))
+    return examples
+
+
 def convert_single_example(ex_index, example, label_list, max_seq_length,
                            tokenizer):
   """Converts a single `InputExample` into a single `InputFeatures`."""
@@ -788,6 +870,8 @@ def main(_):
       "mnli": MnliProcessor,
       "mrpc": MrpcProcessor,
       "xnli": XnliProcessor,
+      "tale": BlackTaleProcessor,
+      "infer": InferProcessor,
   }
 
   tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
