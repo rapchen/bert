@@ -3,30 +3,34 @@ import pprint
 
 import itchat
 import re
+
+import jieba
+
 import blacktale_predict
 from itchat.content import *
 
 
 # 检测work
-def checkAsk(msg):
-    msg1 = '是不是'
-    msg2 = '吗'
-    return re.search(msg1.encode('gbk'), msg.encode('gbk')) or re.search(msg2.encode('gbk'), msg.encode('gbk'))
+def check_summary(msg):
+    word_list = jieba.cut(msg, cut_all=True)
+    www = list(word_list)
+    # print("/".join(www))
 
+    keywords = []
+    for line in open("data/keyword.txt", "r"):
+        keywords.append(line.strip().split())
 
-def checkZongJie(msg):
-    msg100 = '总结'
-    return re.search(msg100.encode('gbk'), msg.encode('gbk'))
+    result = 1
+    for i in keywords:
+        flag = 0
+        for word in www:
+            if word in i:
+                flag = 1
+        if flag == 0:
+            result = 0
+            break
+    return result == 1
 
-
-def checkNo(msg):
-    msg3 = '否定回答'
-    return re.search(msg3.encode('gbk'), msg.encode('gbk'))
-
-
-def checkWuguan(msg):
-    msg3 = '无关紧要'
-    return re.search(msg3.encode('gbk'), msg.encode('gbk'))
 
 
 yesDict = {}
@@ -64,6 +68,8 @@ wuguanImgDict = {'1': 'zongjie1',
                  '2': 'zongjie2',
                  '3': 'zongjie3',
                  '4': 'zongjie4'}
+
+jieba.load_userdict("data/keyword_jieba.txt")
 
 
 @itchat.msg_register(TEXT, isGroupChat=True)
@@ -126,13 +132,20 @@ def getNoteGroup(msg):
     pprint.pprint(msg)
     print('receive:' + msg['Text'])
 
-    possibilities = blacktale_predict.predict_outside(msg['Text'])
-    predict_ans = possibilities.index(max(possibilities))
+    matchAsk = False
+    matchNo = False
+    matchWuguan = False
+    matchZongJie = False
 
-    matchAsk = predict_ans == 0
-    matchNo = predict_ans == 1
-    matchWuguan = predict_ans == 2
-    matchZongJie = False  # checkZongJie(msg['Text'])
+    if msg['Text'].startswith('总结：') or msg['Text'].startswith('总结:'):
+        matchZongJie = check_summary(msg['Text'])
+    else:
+        possibilities = blacktale_predict.predict(msg['Text'])
+        predict_ans = possibilities.index(max(possibilities))
+
+        matchAsk = predict_ans == 0
+        matchNo = predict_ans == 1
+        matchWuguan = predict_ans == 2
 
     if matchAsk:
         print(msg['Text'] + 'matchAsk')
@@ -173,18 +186,25 @@ def getNoteGroup(msg):
 
     if matchZongJie:
         print(msg['Text'] + 'matchZongJie')
-        zongJieInt = zongJieInt + 1
-        zongjieDict[user_nickname] = zongJieInt
-        print('zongjieDict+1')
-        print(zongjieDict)
-        itchat.send('「 %s: %s 」\n- - - - - - - - - - - - - - -\n总结错误，这是您第%s次总结' % (
-            user_nickname, msg['Text'], zongJieInt), group_id)
-        if zongjieImgDict.get(str(zongJieInt)):
-            f = 'img/%s' % (zongjieImgDict.get(str(zongJieInt)))
+        success = check_summary(msg['Text'])
+        print(msg['Text'], '总结成功' if success else '总结失败')
+        if success:
+            itchat.send('「 %s: %s 」\n- - - - - - - - - - - - - - -\n总结成功，太流批啦！' % (
+                user_nickname, msg['Text']), group_id)
+            f = 'img/%s' % (zongjieImgDict.get('1'))
             itchat.send_image(f, group_id)
             print('发送图片' + f)
-        if zongjieTextDict.get(str(zongJieInt)):
-            itchat.send(zongjieTextDict.get(str(zongJieInt)), group_id)
+        else:
+            zongJieInt = zongJieInt + 1
+            zongjieDict[user_nickname] = zongJieInt
+            print('zongjieDict+1')
+            print(zongjieDict)
+            itchat.send('「 %s: %s 」\n- - - - - - - - - - - - - - -\n总结错误…… T_T' % (
+                user_nickname, msg['Text']), group_id)
+            f = 'img/%s' % (zongjieImgDict.get('2'))
+            itchat.send_image(f, group_id)
+            print('发送图片' + f)
+
     # 无关紧要
     if matchWuguan:
         print(msg['Text'] + 'matchWuguan')

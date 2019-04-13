@@ -21,114 +21,16 @@ from __future__ import print_function
 import collections
 import csv
 import os
-import sys
-
-from tensorflow.python.platform.app import _define_help_flags
 
 import modeling
 import optimization
 import tokenization
 import tensorflow as tf
 
-flags = tf.flags
+from config import Params
 
-FLAGS = flags.FLAGS
 
-## Required parameters
-flags.DEFINE_string(
-    "text", None, "The input data for prediction. Required.")
-
-flags.DEFINE_string(
-    "data_dir", "D:/crw/out/blacktale1_2_1/tmp/",
-    "The input data dir. Should contain the .tsv files (or other data files) "
-    "for the task.")
-
-flags.DEFINE_string(
-    "bert_config_file", "D:/crw/chinese_L-12_H-768_A-12/bert_config.json",
-    "The config json file corresponding to the pre-trained BERT model. "
-    "This specifies the model architecture.")
-
-flags.DEFINE_string("task_name", "TALE", "The name of the task to train.")
-
-flags.DEFINE_string("vocab_file", "D:/crw/chinese_L-12_H-768_A-12/vocab.txt",
-                    "The vocabulary file that the BERT model was trained on.")
-
-flags.DEFINE_string(
-    "output_dir", "D:/crw/out/blacktale1_2_1/tmp/",
-    "The output directory where the model checkpoints will be written.")
-
-## Other parameters
-
-flags.DEFINE_string(
-    "init_checkpoint", "D:/crw/out/blacktale1_2_1/model.ckpt-87",
-    "Initial checkpoint (usually from a pre-trained BERT model).")
-
-flags.DEFINE_bool(
-    "do_lower_case", True,
-    "Whether to lower case the input text. Should be True for uncased "
-    "models and False for cased models.")
-
-flags.DEFINE_integer(
-    "max_seq_length", 64,
-    "The maximum total input sequence length after WordPiece tokenization. "
-    "Sequences longer than this will be truncated, and sequences shorter "
-    "than this will be padded.")
-
-flags.DEFINE_bool("do_train", False, "Whether to run training.")
-
-flags.DEFINE_bool("do_eval", False, "Whether to run eval on the dev set.")
-
-flags.DEFINE_bool(
-    "do_predict", True,
-    "Whether to run the model in inference mode on the test set.")
-
-flags.DEFINE_integer("train_batch_size", 32, "Total batch size for training.")
-
-flags.DEFINE_integer("eval_batch_size", 8, "Total batch size for eval.")
-
-flags.DEFINE_integer("predict_batch_size", 1, "Total batch size for predict.")
-
-flags.DEFINE_float("learning_rate", 5e-5, "The initial learning rate for Adam.")
-
-flags.DEFINE_float("num_train_epochs", 3.0,
-                   "Total number of training epochs to perform.")
-
-flags.DEFINE_float(
-    "warmup_proportion", 0.1,
-    "Proportion of training to perform linear learning rate warmup for. "
-    "E.g., 0.1 = 10% of training.")
-
-flags.DEFINE_integer("save_checkpoints_steps", 1000,
-                     "How often to save the model checkpoint.")
-
-flags.DEFINE_integer("iterations_per_loop", 1000,
-                     "How many steps to make in each estimator call.")
-
-flags.DEFINE_bool("use_tpu", False, "Whether to use TPU or GPU/CPU.")
-
-tf.flags.DEFINE_string(
-    "tpu_name", None,
-    "The Cloud TPU to use for training. This should be either the name "
-    "used when creating the Cloud TPU, or a grpc://ip.address.of.tpu:8470 "
-    "url.")
-
-tf.flags.DEFINE_string(
-    "tpu_zone", None,
-    "[Optional] GCE zone where the Cloud TPU is located in. If not "
-    "specified, we will attempt to automatically detect the GCE project from "
-    "metadata.")
-
-tf.flags.DEFINE_string(
-    "gcp_project", None,
-    "[Optional] Project name for the Cloud TPU-enabled project. If not "
-    "specified, we will attempt to automatically detect the GCE project from "
-    "metadata.")
-
-tf.flags.DEFINE_string("master", None, "[Optional] TensorFlow master URL.")
-
-flags.DEFINE_integer(
-    "num_tpu_cores", 8,
-    "Only used if `use_tpu` is True. Total number of TPU cores to use.")
+FLAGS = Params()
 
 
 class InputExample(object):
@@ -711,33 +613,21 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
 def predict(text):
     tf.logging.set_verbosity(tf.logging.WARN)
 
+    tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
+                                                  FLAGS.init_checkpoint)
+
+    bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
+
+    tf.gfile.MakeDirs(FLAGS.output_dir)
+
+    # 获取黑故事对应的Processor
     processors = {
         "tale": BlackTaleProcessor,
         "infer": InferProcessor,
     }
-
-    tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
-                                                  FLAGS.init_checkpoint)
-
-    if not FLAGS.do_train and not FLAGS.do_eval and not FLAGS.do_predict:
-        raise ValueError(
-            "At least one of `do_train`, `do_eval` or `do_predict' must be True.")
-
-    bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
-
-    if FLAGS.max_seq_length > bert_config.max_position_embeddings:
-        raise ValueError(
-            "Cannot use sequence length %d because the BERT model "
-            "was only trained up to sequence length %d" %
-            (FLAGS.max_seq_length, bert_config.max_position_embeddings))
-
-    tf.gfile.MakeDirs(FLAGS.output_dir)
-
     task_name = FLAGS.task_name.lower()
-
     if task_name not in processors:
-        raise ValueError("Task not found: %s" % (task_name))
-
+        raise ValueError("Task not found: %s" % task_name)
     processor = processors[task_name]()
 
     label_list = processor.get_labels()
@@ -747,9 +637,6 @@ def predict(text):
         vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
 
     tpu_cluster_resolver = None
-    if FLAGS.use_tpu and FLAGS.tpu_name:
-        tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
-            FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
 
     is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
     run_config = tf.contrib.tpu.RunConfig(
@@ -787,8 +674,6 @@ def predict(text):
 
     # 预测！
     predict_examples = processor.get_single_example(text)
-    num_actual_predict_examples = 1
-
     predict_file = os.path.join(FLAGS.output_dir, "predict.tf_record")
     file_based_convert_examples_to_features(predict_examples, label_list,
                                             FLAGS.max_seq_length, tokenizer,
@@ -806,25 +691,11 @@ def predict(text):
 
     tf.logging.info("***** Predict results *****")
     probabilities = list(result)[0]["probabilities"]
+    print('预测文本：', text)
     print("预测结果： 是：{0}，否：{1}，无关紧要：{2}", *probabilities)
-    # output_line = "\t".join(
-    #     str(class_probability)
-    #     for class_probability in probabilities) + "\n"
-    # print(output_line)
     os.remove(predict_file)
     return probabilities
 
 
-def main(_):
-    predict(FLAGS.text)
-
-
-def predict_outside(text):
-    _define_help_flags()
-    return predict(text)
-
-
 if __name__ == "__main__":
-    predict_outside("他是被烧死的吗？")
-    flags.mark_flag_as_required("text")
-    tf.app.run()
+    predict("他是被烧死的吗？")
