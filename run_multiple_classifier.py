@@ -1,19 +1,6 @@
-# coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""BERT finetuning runner."""
-
+"""
+    微调BERT模型做文本多分类
+"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -96,32 +83,6 @@ flags.DEFINE_integer("save_checkpoints_steps", 1000,
 
 flags.DEFINE_integer("iterations_per_loop", 1000,
                      "How many steps to make in each estimator call.")
-
-flags.DEFINE_bool("use_tpu", False, "Whether to use TPU or GPU/CPU.")
-
-tf.flags.DEFINE_string(
-    "tpu_name", None,
-    "The Cloud TPU to use for training. This should be either the name "
-    "used when creating the Cloud TPU, or a grpc://ip.address.of.tpu:8470 "
-    "url.")
-
-tf.flags.DEFINE_string(
-    "tpu_zone", None,
-    "[Optional] GCE zone where the Cloud TPU is located in. If not "
-    "specified, we will attempt to automatically detect the GCE project from "
-    "metadata.")
-
-tf.flags.DEFINE_string(
-    "gcp_project", None,
-    "[Optional] Project name for the Cloud TPU-enabled project. If not "
-    "specified, we will attempt to automatically detect the GCE project from "
-    "metadata.")
-
-tf.flags.DEFINE_string("master", None, "[Optional] TensorFlow master URL.")
-
-flags.DEFINE_integer(
-    "num_tpu_cores", 8,
-    "Only used if `use_tpu` is True. Total number of TPU cores to use.")
 
 
 class InputExample(object):
@@ -413,8 +374,8 @@ class BlackTaleProcessor(DataProcessor):
         return examples
 
 
-class InferProcessor(DataProcessor):
-    """Processor for the Black Tale data set."""
+class MultiProcessor(DataProcessor):
+    """处理文本多分类数据的Processor"""
 
     def get_train_examples(self, data_dir):
         """See base class."""
@@ -564,7 +525,14 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
 
 def file_based_convert_examples_to_features(
         examples, label_list, max_seq_length, tokenizer, output_file):
-    """Convert a set of `InputExample`s to a TFRecord file."""
+    """
+    Convert a set of `InputExample`s to a TFRecord file.
+    :param examples: 样本（ImputExample）的列表，processor处理语料文件得到的
+    :param label_list: processor中定义的label列表
+    :param max_seq_length: 最大序列长度
+    :param tokenizer: 直接加载的FullTokenizer
+    :param output_file: 转化后输出的文件目录
+    """
 
     writer = tf.python_io.TFRecordWriter(output_file)
 
@@ -670,14 +638,13 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
 
     # In the demo, we are doing a simple classification task on the entire
     # segment.
+    #
     # If you want to use the token-level output, use model.get_sequence_output()
     # instead.
-    # 句子级别的分类任务，只需要取pooled_output即可，这个结果是[CLS]对应的节点转化得到的
     output_layer = model.get_pooled_output()
 
     hidden_size = output_layer.shape[-1].value
 
-    # 接一层全连接+softmax
     output_weights = tf.get_variable(
         "output_weights", [num_labels, hidden_size],
         initializer=tf.truncated_normal_initializer(stddev=0.02))
@@ -726,7 +693,6 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         for name in sorted(features.keys()):
             tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
-        # 从features里读数据
         input_ids = features["input_ids"]
         input_mask = features["input_mask"]
         segment_ids = features["segment_ids"]
@@ -739,7 +705,6 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
         is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
-        # 创建模型
         (total_loss, per_example_loss, logits, probabilities) = create_model(
             bert_config, is_training, input_ids, input_mask, segment_ids, label_ids,
             num_labels, use_one_hot_embeddings)
@@ -747,19 +712,10 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         # 读取预训练模型，其中需要将原模型的参数中属于trainable_variables的部分整合成参数列表传进init_from_checkpoint
         tvars = tf.trainable_variables()
         initialized_variable_names = {}
-        scaffold_fn = None
         if init_checkpoint:
             (assignment_map, initialized_variable_names
              ) = modeling.get_assignment_map_from_checkpoint(tvars, init_checkpoint)
-            if use_tpu:
-
-                def tpu_scaffold():
-                    tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
-                    return tf.train.Scaffold()
-
-                scaffold_fn = tpu_scaffold
-            else:
-                tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
+            tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
 
         tf.logging.info("**** Trainable Variables ****")
         for var in tvars:
@@ -772,19 +728,16 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         output_spec = None
         if mode == tf.estimator.ModeKeys.TRAIN:
 
-            # 训练逻辑
             train_op = optimization.create_optimizer(
                 total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
 
-            output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+            output_spec = tf.estimator.EstimatorSpec(
                 mode=mode,
                 loss=total_loss,
-                train_op=train_op,
-                scaffold_fn=scaffold_fn)
+                train_op=train_op
+            )
         elif mode == tf.estimator.ModeKeys.EVAL:
 
-            # 评估逻辑
-            # 定义一个metric_fn，接收模型预测得到的结果，计算得到两个指标
             def metric_fn(per_example_loss, label_ids, logits, is_real_example):
                 predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)
                 accuracy = tf.metrics.accuracy(
@@ -795,20 +748,15 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                     "eval_loss": loss,
                 }
 
-            # TPUEstimatorSpec接收这个metric_fn和对应的输入（即模型预测结果）；EstimatorSpec则直接接收计算得到的指标
-            eval_metrics = (metric_fn,
-                            [per_example_loss, label_ids, logits, is_real_example])
-            output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+            eval_metric_ops = metric_fn(per_example_loss, label_ids, logits, is_real_example)
+            output_spec = tf.estimator.EstimatorSpec(
                 mode=mode,
                 loss=total_loss,
-                eval_metrics=eval_metrics,
-                scaffold_fn=scaffold_fn)
+                eval_metric_ops=eval_metric_ops)
         else:
-            # 预测逻辑，只返回probabilities（softmax后的结果）
-            output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+            output_spec = tf.estimator.EstimatorSpec(
                 mode=mode,
-                predictions={"probabilities": probabilities},
-                scaffold_fn=scaffold_fn)
+                predictions={"probabilities": probabilities})
         return output_spec
 
     return model_fn
@@ -895,7 +843,7 @@ def main(_):
         "mrpc": MrpcProcessor,
         "xnli": XnliProcessor,
         "tale": BlackTaleProcessor,
-        "infer": InferProcessor,
+        "infer": MultiProcessor,
     }
 
     # 校验参数的合理性，如检查预训练模型和命令行参数对大小写的处理是否一致；是否指定了任务；命令行指定的最大长度是否比预训练模型长
@@ -930,34 +878,23 @@ def main(_):
     tokenizer = tokenization.FullTokenizer(
         vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
 
-    # 进行配置，用tpu.RunConfig包装了estimator.RunConfig，额外包含了TPU配置，剩下的model_dir和save_checkpoints_steps被传给了estimator.RunConfig
-    tpu_cluster_resolver = None
-    if FLAGS.use_tpu and FLAGS.tpu_name:
-        tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
-            FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
-
-    is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
-    run_config = tf.contrib.tpu.RunConfig(
-        cluster=tpu_cluster_resolver,
-        master=FLAGS.master,
+    # 进行配置，用tpu.RunConfig包装了estimator.RunConfig，额外包含了TPU配置
+    run_config = tf.estimator.RunConfig(
         model_dir=FLAGS.output_dir,
-        save_checkpoints_steps=FLAGS.save_checkpoints_steps,
-        tpu_config=tf.contrib.tpu.TPUConfig(
-            iterations_per_loop=FLAGS.iterations_per_loop,
-            num_shards=FLAGS.num_tpu_cores,
-            per_host_input_for_training=is_per_host))
+        save_checkpoints_steps=FLAGS.save_checkpoints_steps
+    )
 
-    # 读取训练相关的参数，其中训练样本是通过processor处理语料得到，另两个是读命令行参数
     train_examples = None
     num_train_steps = None
     num_warmup_steps = None
     if FLAGS.do_train:
+        # 用processor定义的方法读语料文件得到train_examples，InputExample类的列表
         train_examples = processor.get_train_examples(FLAGS.data_dir)
         num_train_steps = int(
             len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
         num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
 
-    # 创建模型函数model_fn
+    # 创建模型函数
     model_fn = model_fn_builder(
         bert_config=bert_config,
         num_labels=len(label_list),
@@ -965,20 +902,18 @@ def main(_):
         learning_rate=FLAGS.learning_rate,
         num_train_steps=num_train_steps,
         num_warmup_steps=num_warmup_steps,
-        use_tpu=FLAGS.use_tpu,
-        use_one_hot_embeddings=FLAGS.use_tpu)
+        use_tpu=False,
+        use_one_hot_embeddings=False)
 
-    # 用上述模型函数实例化自定义的Estimator
-    estimator = tf.contrib.tpu.TPUEstimator(
-        use_tpu=FLAGS.use_tpu,
+    # 实例化自定义Estimator
+    estimator = tf.estimator.Estimator(
         model_fn=model_fn,
-        config=run_config,
-        train_batch_size=FLAGS.train_batch_size,
-        eval_batch_size=FLAGS.eval_batch_size,
-        predict_batch_size=FLAGS.predict_batch_size)
+        config=run_config
+    )
 
     if FLAGS.do_train:
         train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
+        # 将训练样本（InputExample列表，包含文本）处理成特征张量输出到train_file
         file_based_convert_examples_to_features(
             train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
         tf.logging.info("***** Running training *****")
@@ -995,14 +930,6 @@ def main(_):
     if FLAGS.do_eval:
         eval_examples = processor.get_dev_examples(FLAGS.data_dir)
         num_actual_eval_examples = len(eval_examples)
-        if FLAGS.use_tpu:
-            # TPU requires a fixed batch size for all batches, therefore the number
-            # of examples must be a multiple of the batch size, or else examples
-            # will get dropped. So we pad with fake examples which are ignored
-            # later on. These do NOT count towards the metric (all tf.metrics
-            # support a per-instance weight, and these get a weight of 0.0).
-            while len(eval_examples) % FLAGS.eval_batch_size != 0:
-                eval_examples.append(PaddingInputExample())
 
         eval_file = os.path.join(FLAGS.output_dir, "eval.tf_record")
         file_based_convert_examples_to_features(
@@ -1014,22 +941,13 @@ def main(_):
                         len(eval_examples) - num_actual_eval_examples)
         tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
 
-        # This tells the estimator to run through the entire set.
-        eval_steps = None
-        # However, if running eval on the TPU, you will need to specify the
-        # number of steps.
-        if FLAGS.use_tpu:
-            assert len(eval_examples) % FLAGS.eval_batch_size == 0
-            eval_steps = int(len(eval_examples) // FLAGS.eval_batch_size)
-
-        eval_drop_remainder = True if FLAGS.use_tpu else False
         eval_input_fn = file_based_input_fn_builder(
             input_file=eval_file,
             seq_length=FLAGS.max_seq_length,
             is_training=False,
-            drop_remainder=eval_drop_remainder)
+            drop_remainder=False)
 
-        result = estimator.evaluate(input_fn=eval_input_fn, steps=eval_steps)
+        result = estimator.evaluate(input_fn=eval_input_fn)
 
         output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
         with tf.gfile.GFile(output_eval_file, "w") as writer:
@@ -1041,13 +959,6 @@ def main(_):
     if FLAGS.do_predict:
         predict_examples = processor.get_test_examples(FLAGS.data_dir)
         num_actual_predict_examples = len(predict_examples)
-        if FLAGS.use_tpu:
-            # TPU requires a fixed batch size for all batches, therefore the number
-            # of examples must be a multiple of the batch size, or else examples
-            # will get dropped. So we pad with fake examples which are ignored
-            # later on.
-            while len(predict_examples) % FLAGS.predict_batch_size != 0:
-                predict_examples.append(PaddingInputExample())
 
         predict_file = os.path.join(FLAGS.output_dir, "predict.tf_record")
         file_based_convert_examples_to_features(predict_examples, label_list,
@@ -1060,12 +971,11 @@ def main(_):
                         len(predict_examples) - num_actual_predict_examples)
         tf.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
 
-        predict_drop_remainder = True if FLAGS.use_tpu else False
         predict_input_fn = file_based_input_fn_builder(
             input_file=predict_file,
             seq_length=FLAGS.max_seq_length,
             is_training=False,
-            drop_remainder=predict_drop_remainder)
+            drop_remainder=False)
 
         result = estimator.predict(input_fn=predict_input_fn)
 
