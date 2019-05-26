@@ -458,7 +458,11 @@ class InferProcessor(DataProcessor):
 
 def convert_single_example(ex_index, example, label_list, max_seq_length,
                            tokenizer):
-    """Converts a single `InputExample` into a single `InputFeatures`."""
+    """
+    Converts a single `InputExample` into a single `InputFeatures`.
+    :param ex_index: 正在转换的这个样本的ID，唯一作用是将前5个样本输出
+    :return InputFeatures类型包装的结果
+    """
 
     # 处理PaddingInputExample，这是为了对齐batch_size添加的无意义样本
     if isinstance(example, PaddingInputExample):
@@ -526,6 +530,7 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
         tokens.append("[SEP]")
         segment_ids.append(1)
 
+    # 用tokenizer的方法将token转为对应的input_id
     input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
     # The mask has 1 for real tokens and 0 for padding tokens. Only real
@@ -543,6 +548,7 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
     assert len(segment_ids) == max_seq_length
 
     label_id = label_map[example.label]
+    # 将前5个样本输出……
     if ex_index < 5:
         tf.logging.info("*** Example ***")
         tf.logging.info("guid: %s" % (example.guid))
@@ -606,6 +612,7 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
 
     def _decode_record(record, name_to_features):
         """Decodes a record to a TensorFlow example."""
+        # parse_single_example返回的结果就是一个特征字典
         example = tf.parse_single_example(record, name_to_features)
 
         # tf.Example only supports tf.int64, but the TPU only supports tf.int32.
@@ -624,12 +631,14 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
 
         # For training, we want a lot of parallel reading and shuffling.
         # For eval, we want no shuffling and parallel reading doesn't matter.
+        # 先用TFRecordDataset读取文件
         d = tf.data.TFRecordDataset(input_file)
         if is_training:
             d = d.repeat()
             d = d.shuffle(buffer_size=100)
 
         d = d.apply(
+            # map_and_batch等价于先batch后map
             tf.contrib.data.map_and_batch(
                 lambda record: _decode_record(record, name_to_features),
                 batch_size=batch_size,
